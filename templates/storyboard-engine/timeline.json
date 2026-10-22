@@ -1,0 +1,11 @@
+{
+  "duration_s": 10,
+  "fps": 25,
+  "canvas": {
+    "w": 1920,
+    "h": 1080,
+    "aspect": "16:9"
+  },
+  "groups": [],
+  "shots": []
+}

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=1920, height=1080">
+    <title>故事板视频工程 · 总时间线</title>
+    <script src="lib/gsap.min.js"></script>
+    <script src="lib/loader.js"></script>
+    <script src="lib/camera.js"></script>
+    <style>
+      html, body { margin: 0; background: #000; }
+      #root { position: relative; width: 1920px; height: 1080px; overflow: hidden; }
+      #root > [data-composition-src] { position: absolute; inset: 0; }
+      #stage-bg { position: absolute; inset: 0; background: #f4f5f5; }
+    </style>
+  </head>
+  <body>
+    <!-- 修改总时长，并按连续性分组挂载 compositions。 -->
+    <div id="root" data-hf-id="hf-master-root" data-composition-id="main" data-start="0" data-width="1920" data-height="1080" data-duration="10" data-fps="25">
+      <div id="stage-bg" class="clip" data-hf-id="hf-master-bg" data-start="0" data-duration="10" data-track-index="0"></div>
+
+      <!-- 示例分组。正式制作时可保留、改名或替换。 -->
+      <div id="slot-01" data-hf-id="hf-master-slot-01" data-composition-id="grp01-example" data-composition-src="compositions/01-example-group.html" data-start="0" data-duration="10" data-track-index="1" data-width="1920" data-height="1080"></div>
+
+      <!-- 配音和 BGM 放在 root 内，源文件统一放 assets/audio/。 -->
+    </div>
+    <script>
+      window.__timelines = window.__timelines || {};
+      window.__timelines.main = gsap.timeline({ paused: true });
+    </script>
+  </body>
+</html>

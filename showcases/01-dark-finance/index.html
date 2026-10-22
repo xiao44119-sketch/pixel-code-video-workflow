@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920, height=1080">
+  <title>01 · 钱起源于一种共识 (Dark Financial Consensus)</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%;
+      background: #040507;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+      user-select: none;
+    }
+    #stage {
+      position: absolute;
+      left: 50%; top: 50%;
+      width: 1920px; height: 1080px;
+      transform: translate(-50%, -50%);
+      transform-origin: center center;
+      background: #040507;
+      overflow: hidden;
+    }
+    canvas {
+      position: absolute;
+      left: 0; top: 0;
+      width: 1920px; height: 1080px;
+    }
+    #ui-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: center;
+      padding-bottom: 90px;
+    }
+    .caption-box {
+      text-align: center;
+      opacity: 0;
+      transform: translateY(16px);
+      transition: opacity 0.1s linear, transform 0.1s linear;
+    }
+    .main-title {
+      font-size: 42px;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      color: #f1f3f5;
+      text-shadow: 0 0 24px rgba(255, 255, 255, 0.4), 0 2px 8px rgba(0, 0, 0, 0.9);
+      margin-bottom: 10px;
+    }
+    .sub-en {
+      font-size: 15px;
+      font-weight: 400;
+      letter-spacing: 0.36em;
+      color: #7b8492;
+      text-transform: uppercase;
+    }
+    /* Interactive Controller for browser preview */
+    #controls {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(18, 22, 29, 0.85);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 40px;
+      padding: 10px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      z-index: 9999;
+      color: #e0e4ec;
+      font-size: 13px;
+      font-family: monospace;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    #controls button {
+      background: #2a313d;
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #fff;
+      border-radius: 20px;
+      padding: 6px 14px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    #controls button:hover { background: #3c4656; }
+    #timeline-slider {
+      width: 320px;
+      cursor: pointer;
+      accent-color: #f2c85b;
+    }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <canvas id="c" width="1920" height="1080"></canvas>
+    <div id="ui-layer">
+      <div id="captionBox" class="caption-box">
+        <div class="main-title">钱起源于一种共识</div>
+        <div class="sub-en">MONEY ORIGINATES FROM A SHARED CONSENSUS</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="controls">
+    <button id="btnPlay">PAUSE</button>
+    <input type="range" id="timeline-slider" min="0" max="5" step="0.01" value="0">
+    <span id="time-display">0.00s / 5.00s</span>
+  </div>
+
+  <script>
+    (function() {
+      const canvas = document.getElementById('c');
+      const ctx = canvas.getContext('2d');
+      const captionBox = document.getElementById('captionBox');
+      const DURATION = 5.0; // 5 seconds
+      const FPS = 30;
+
+      // Deterministic math utilities
+      function clamp(v, min, max) { return Math.min(Math.max(v, min), max); }
+      function easeOutCubic(x) { return 1 - Math.pow(1 - x, 3); }
+      function easeInOutQuad(x) { return x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2; }
+      function easeOutQuart(x) { return 1 - Math.pow(1 - x, 4); }
+
+      // 3D Projection math
+      const FOCAL = 900;
+      const CX = 960;
+      const HORIZON_Y = 510;
+
+      function project(x, y, z, camZ = 0, camY = 0) {
+        const pz = z - camZ;
+        if (pz <= 10) return null;
+        const scale = FOCAL / pz;
+        const px = CX + x * scale;
+        const py = HORIZON_Y - (y - camY) * scale;
+        return { px, py, scale, pz };
+      }
+
+      // Pillars setup (arranged radially around center (0, 0, 0))
+      const PILLARS = [];
+      const NUM_PILLARS = 10;
+      const RADIUS = 460;
+      for (let i = 0; i < NUM_PILLARS; i++) {
+        const angle = (i / NUM_PILLARS) * Math.PI * 2 + 0.32;
+        const x = Math.cos(angle) * RADIUS * 1.35;
+        const z = 700 + Math.sin(angle) * (RADIUS * 0.75);
+        const height = 110 + (Math.sin(i * 1.7) * 20);
+        const width = 24;
+        PILLARS.push({ x, z, height, width, angle });
+      }
+      // Sort back-to-front by initial z
+      PILLARS.sort((a, b) => b.z - a.z);
+
+      // Deterministic micro particles
+      const PARTICLES = [];
+      for (let i = 0; i < 60; i++) {
+        const seed = (i * 9301 + 49297) % 233280;
+        const rnd1 = seed / 233280;
+        const rnd2 = ((seed * 9301 + 49297) % 233280) / 233280;
+        const rnd3 = ((seed * 1103515245 + 12345) % 233280) / 233280;
+        PARTICLES.push({
+          x: (rnd1 - 0.5) * 600,
+          y: rnd2 * 180 - 20,
+          z: 600 + rnd3 * 350,
+          size: 1.0 + rnd1 * 2.0,
+          speed: 0.2 + rnd2 * 0.4
+        });
+      }
+
+      // Core Render function: renderFrame(t)
+      window.renderFrame = function(t) {
+        t = clamp(t, 0, DURATION);
+
+        // Clear frame
+        ctx.fillStyle = '#040608';
+        ctx.fillRect(0, 0, 1920, 1080);
+
+        // 1. Background sky & horizon gradient
+        const bgGrad = ctx.createLinearGradient(0, 0, 0, HORIZON_Y);
+        bgGrad.addColorStop(0, '#040609');
+        bgGrad.addColorStop(0.7, '#0a0d13');
+        bgGrad.addColorStop(1, '#151922');
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(0, 0, 1920, HORIZON_Y);
+
+        // Horizon line glow
+        ctx.beginPath();
+        ctx.moveTo(0, HORIZON_Y);
+        ctx.lineTo(1920, HORIZON_Y);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+
+        // 2. Ground plane gradient (perspective receding)
+        const groundGrad = ctx.createLinearGradient(0, HORIZON_Y, 0, 1080);
+        groundGrad.addColorStop(0, '#0a0c10');
+        groundGrad.addColorStop(0.35, '#06070a');
+        groundGrad.addColorStop(1, '#030405');
+        ctx.fillStyle = groundGrad;
+        ctx.fillRect(0, HORIZON_Y, 1920, 1080 - HORIZON_Y);
+
+        // Smooth camera trajectory (slow cinematic dolly-in)
+        const camProgress = easeInOutQuad(t / DURATION);
+        const camZ = -60 + camProgress * 90;
+        const camY = 35 - camProgress * 15;
+
+        // Central sphere coordinates in 3D
+        const sphereFloat = Math.sin(t * 1.8) * 6;
+        const sphereX = 0;
+        const sphereY = 32 + sphereFloat;
+        const sphereZ = 700;
+        const sphereProj = project(sphereX, sphereY, sphereZ, camZ, camY);
+
+        // 3. Ground Light Pool (Radial cast beneath sphere)
+        if (sphereProj) {
+          const groundCenter = project(sphereX, 0, sphereZ, camZ, camY);
+          if (groundCenter) {
+            const pulse = 1.0 + Math.sin(t * 2.5) * 0.06;
+            const poolRadiusX = 480 * sphereProj.scale * pulse;
+            const poolRadiusY = 140 * sphereProj.scale * pulse;
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.ellipse(groundCenter.px, groundCenter.py + 4, poolRadiusX, poolRadiusY, 0, 0, Math.PI * 2);
+            const poolGrad = ctx.createRadialGradient(
+              groundCenter.px, groundCenter.py, 10,
+              groundCenter.px, groundCenter.py, poolRadiusX
+            );
+            poolGrad.addColorStop(0, 'rgba(255, 255, 255, 0.42)');
+            poolGrad.addColorStop(0.2, 'rgba(230, 240, 255, 0.22)');
+            poolGrad.addColorStop(0.6, 'rgba(120, 140, 180, 0.08)');
+            poolGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = poolGrad;
+            ctx.fill();
+            ctx.restore();
+          }
+        }
+
+        // 4. Subtle Ground Perspective Lines
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.025)';
+        ctx.lineWidth = 1;
+        for (let gx = -1600; gx <= 1600; gx += 320) {
+          const pStart = project(gx, 0, 520, camZ, camY);
+          const pEnd = project(gx, 0, 1600, camZ, camY);
+          if (pStart && pEnd) {
+            ctx.beginPath();
+            ctx.moveTo(pStart.px, pStart.py);
+            ctx.lineTo(pEnd.px, pEnd.py);
+            ctx.stroke();
+          }
+        }
+        ctx.restore();
+
+        // 5. Draw Monolith Pillars
+        for (const p of PILLARS) {
+          const base = project(p.x, 0, p.z, camZ, camY);
+          const top = project(p.x, p.height, p.z, camZ, camY);
+          if (!base || !top) continue;
+
+          const w = p.width * base.scale;
+          const h = base.py - top.py;
+
+          // Ground shadow beneath pillar
+          ctx.save();
+          ctx.beginPath();
+          ctx.ellipse(base.px, base.py, w * 1.4, w * 0.45, 0, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+          ctx.fill();
+          ctx.restore();
+
+          // Pillar Body
+          const pillarGrad = ctx.createLinearGradient(base.px - w/2, 0, base.px + w/2, 0);
+          const isLeft = p.x < 0;
+          if (isLeft) {
+            pillarGrad.addColorStop(0, '#151920');
+            pillarGrad.addColorStop(0.7, '#242b36');
+            pillarGrad.addColorStop(1, '#8b96a8');
+          } else {
+            pillarGrad.addColorStop(0, '#8b96a8');
+            pillarGrad.addColorStop(0.3, '#242b36');
+            pillarGrad.addColorStop(1, '#151920');
+          }
+
+          ctx.fillStyle = pillarGrad;
+          ctx.fillRect(base.px - w/2, top.py, w, h);
+
+          // Top Face Bevel
+          ctx.beginPath();
+          ctx.ellipse(base.px, top.py, w/2, w * 0.22, 0, 0, Math.PI * 2);
+          ctx.fillStyle = '#b0bac9';
+          ctx.fill();
+
+          // Subtle pillar contour highlight
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+          ctx.lineWidth = 0.8;
+          ctx.strokeRect(base.px - w/2, top.py, w, h);
+        }
+
+        // 6. Ray Filaments connecting Sphere to Pillars (Emerges at t >= 1.2s)
+        if (t >= 1.2 && sphereProj) {
+          const rayProgress = easeOutCubic(clamp((t - 1.2) / 1.8, 0, 1));
+          ctx.save();
+          for (let i = 0; i < PILLARS.length; i++) {
+            const p = PILLARS[i];
+            const pTop = project(p.x, p.height * 0.75, p.z, camZ, camY);
+            if (!pTop) continue;
+
+            const targetX = sphereProj.px + (pTop.px - sphereProj.px) * rayProgress;
+            const targetY = sphereProj.py + (pTop.py - sphereProj.py) * rayProgress;
+
+            ctx.beginPath();
+            ctx.moveTo(sphereProj.px, sphereProj.py);
+            ctx.lineTo(targetX, targetY);
+            const rayGrad = ctx.createLinearGradient(sphereProj.px, sphereProj.py, targetX, targetY);
+            rayGrad.addColorStop(0, 'rgba(255, 255, 255, 0.75)');
+            rayGrad.addColorStop(0.5, 'rgba(240, 245, 255, 0.28)');
+            rayGrad.addColorStop(1, 'rgba(255, 255, 255, 0.05)');
+            ctx.strokeStyle = rayGrad;
+            ctx.lineWidth = 1.0;
+            ctx.stroke();
+
+            if (rayProgress > 0.85) {
+              const pingAlpha = (rayProgress - 0.85) / 0.15;
+              ctx.beginPath();
+              ctx.arc(pTop.px, pTop.py, 3.5, 0, Math.PI * 2);
+              ctx.fillStyle = `rgba(255, 255, 255, ${pingAlpha * 0.9})`;
+              ctx.fill();
+            }
+          }
+          ctx.restore();
+        }
+
+        // 7. Ambient Micro Dust Particles
+        ctx.save();
+        for (const pt of PARTICLES) {
+          const curY = pt.y + Math.sin(t * pt.speed + pt.x) * 12;
+          const proj = project(pt.x, curY, pt.z, camZ, camY);
+          if (proj) {
+            const pAlpha = clamp((proj.pz - 400) / 400, 0.2, 0.85);
+            ctx.beginPath();
+            ctx.arc(proj.px, proj.py, pt.size * proj.scale, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(235, 245, 255, ${pAlpha * 0.45})`;
+            ctx.fill();
+          }
+        }
+        ctx.restore();
+
+        // 8. The Central Consensus Luminous Sphere
+        if (sphereProj) {
+          const sphereRadius = 38 * sphereProj.scale;
+          const pulse = 1.0 + Math.sin(t * 3.2) * 0.04;
+
+          // A. Outer diffuse halo
+          ctx.save();
+          const haloRadius = sphereRadius * 6.5 * pulse;
+          const haloGrad = ctx.createRadialGradient(
+            sphereProj.px, sphereProj.py, sphereRadius * 0.5,
+            sphereProj.px, sphereProj.py, haloRadius
+          );
+          haloGrad.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
+          haloGrad.addColorStop(0.12, 'rgba(240, 245, 255, 0.6)');
+          haloGrad.addColorStop(0.35, 'rgba(180, 205, 240, 0.22)');
+          haloGrad.addColorStop(0.7, 'rgba(100, 130, 180, 0.06)');
+          haloGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+          ctx.fillStyle = haloGrad;
+          ctx.beginPath();
+          ctx.arc(sphereProj.px, sphereProj.py, haloRadius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+
+          // B. Inner Core Sphere
+          ctx.save();
+          const coreGrad = ctx.createRadialGradient(
+            sphereProj.px - sphereRadius * 0.28, sphereProj.py - sphereRadius * 0.28, sphereRadius * 0.08,
+            sphereProj.px, sphereProj.py, sphereRadius
+          );
+          coreGrad.addColorStop(0, '#ffffff');
+          coreGrad.addColorStop(0.65, '#f5f8ff');
+          coreGrad.addColorStop(0.9, '#dce5f2');
+          coreGrad.addColorStop(1, '#9eafc4');
+          ctx.fillStyle = coreGrad;
+          ctx.beginPath();
+          ctx.arc(sphereProj.px, sphereProj.py, sphereRadius, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Intense core hot-spot
+          ctx.beginPath();
+          ctx.arc(sphereProj.px - sphereRadius * 0.2, sphereProj.py - sphereRadius * 0.2, sphereRadius * 0.35, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+          ctx.fill();
+          ctx.restore();
+        }
+
+        // 9. Subtitle Typography & Reveal (1.0s to 5.0s)
+        const titleProgress = easeOutCubic(clamp((t - 0.8) / 0.9, 0, 1));
+        captionBox.style.opacity = titleProgress;
+        captionBox.style.transform = `translateY(${(1 - titleProgress) * 16}px)`;
+      };
+
+      // Browser interactive loop
+      let isPlaying = true;
+      let startTime = performance.now();
+
+      function loop() {
+        if (isPlaying) {
+          const now = performance.now();
+          const elapsed = ((now - startTime) / 1000) % DURATION;
+          window.renderFrame(elapsed);
+          document.getElementById('timeline-slider').value = elapsed;
+          document.getElementById('time-display').innerText = elapsed.toFixed(2) + 's / ' + DURATION.toFixed(2) + 's';
+        }
+        requestAnimationFrame(loop);
+      }
+
+      const slider = document.getElementById('timeline-slider');
+      const btnPlay = document.getElementById('btnPlay');
+      slider.addEventListener('input', (e) => {
+        isPlaying = false;
+        btnPlay.innerText = 'PLAY';
+        const val = parseFloat(e.target.value);
+        window.renderFrame(val);
+        document.getElementById('time-display').innerText = val.toFixed(2) + 's / ' + DURATION.toFixed(2) + 's';
+      });
+
+      btnPlay.addEventListener('click', () => {
+        isPlaying = !isPlaying;
+        btnPlay.innerText = isPlaying ? 'PAUSE' : 'PLAY';
+        if (isPlaying) startTime = performance.now() - parseFloat(slider.value) * 1000;
+      });
+
+      window.renderFrame(0);
+      requestAnimationFrame(loop);
+    })();
+  </script>
+</body>
+</html>

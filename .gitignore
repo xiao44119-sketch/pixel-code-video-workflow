@@ -1,0 +1,30 @@
+# Video & Heavy Media Outputs
+*.mov
+*.mp4
+*.m4v
+*.avi
+*.wmv
+*.flv
+*.mkv
+*.wav
+*.zip
+*.tar.gz
+*.gz
+*.7z
+
+# Renders & Cache
+renders/
+output/
+tmp/
+.thumbnails/
+.cache/
+.media/
+*.log
+
+# Dependencies
+node_modules/
+pnpm-lock.yaml
+
+# System & OS
+.DS_Store
+Thumbs.db

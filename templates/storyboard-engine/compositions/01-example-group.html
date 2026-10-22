@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8">
+    <title>分组 01（示例）</title>
+    <!--
+      这个 <head> 只在"直接打开本文件"时生效。
+      挂载到总时间线时，运行时只克隆 <template> 的内容，<head> 整个被丢弃。
+      所以这里放的东西不会影响成片，专门用来支撑单镜头入口。
+    -->
+    <script src="../lib/gsap.min.js"></script>
+    <script src="../lib/loader.js"></script>
+    <script src="../lib/camera.js"></script>
+    <script src="../lib/hf-standalone.js"></script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #07070a;
+      }
+    </style>
+  </head>
+
+  <body>
+    <template>
+      <!-- 样式必须放在 template 内部。放 <head> 会被丢弃，画面会变成左上角的裸文字。
+           根元素只能用 #root 选中，不能用 class —— 合成时 CSS 会被作用域化，
+           根上的 class 规则会全部失效。 -->
+      <style>
+        #root {
+          position: absolute;
+          inset: 0;
+          overflow: hidden;
+          /* 模板不带任何 webfont —— 渲染时零网络请求。
+             要用指定字体（含中文），把 woff2 放进 assets/fonts/ 再写：
+               @font-face { font-family: 'YourFont';
+                            src: url('../assets/fonts/YourFont.woff2') format('woff2'); }
+             只写字体名不写 @font-face 是无效的，会静默退化。 */
+          font-family: system-ui, sans-serif;
+          color: #e8e8ea;
+        }
+        .backdrop {
+          position: absolute;
+          inset: 0;
+          background: radial-gradient(120% 80% at 50% 40%, #16161d 0%, #07070a 70%);
+        }
+        .panel {
+          position: absolute;
+          display: block;
+          box-sizing: border-box;
+          border: 1px solid rgba(232, 232, 234, 0.28);
+          background: rgba(232, 232, 234, 0.04);
+          transform-origin: left center;
+        }
+        .panel .fill {
+          position: absolute;
+          left: 0;
+          top: 0;
+          bottom: 0;
+          background: linear-gradient(90deg, rgba(232, 232, 234, 0.5), rgba(232, 232, 234, 0.12));
+        }
+        .caption {
+          position: absolute;
+          left: 120px;
+          bottom: 120px;
+          font-size: 34px;
+          letter-spacing: 0.04em;
+          opacity: 0.85;
+        }
+      </style>
+
+      <div data-hf-id="hf-3py2" id="root" data-composition-id="grp01-example" data-width="1920" data-height="1080">
+        <div data-hf-id="hf-j1s6" class="backdrop"></div>
+
+        <!--
+          同一组里的所有镜头共享这一棵场景树。
+          镜头 B 不新建面板，它让镜头 A 的面板继续演化 —— 这就是母场景复用。
+        -->
+        <div data-hf-id="hf-il1n" id="grp01-panel-a" class="panel"><i data-hf-id="hf-ups7" class="fill"></i></div>
+        <div data-hf-id="hf-9x5s" id="grp01-panel-b" class="panel"><i data-hf-id="hf-lx5z" class="fill"></i></div>
+        <div data-hf-id="hf-aotl" id="grp01-panel-c" class="panel"><i data-hf-id="hf-liuy" class="fill"></i></div>
+
+        <div data-hf-id="hf-783q" id="grp01-caption" class="caption">分组示例 · 两镜共享一棵场景树</div>
+      </div>
+
+      <script>
+        (function () {
+          "use strict";
+
+          // ============================================================
+          // PARAMS —— 所有硬编码数值集中在这里，绘制逻辑只从这里读值。
+          // 随时间插值的量拆成 _start / _end 两项。
+          // ============================================================
+          var PARAMS = {
+            camZ_start: 0,
+            camZ_end: 620,
+            camFocal: 1200,
+            panelW: 420,
+            panelH: 96,
+            panelGapY: 150,
+            worldX: -420,
+            worldY: 150,
+            fillA_start: 0.34,
+            fillA_end: 0.86,
+            shotB_at: 5.0
+          };
+
+          // 面板给调参面板用的 schema，tune.html 据此自动生成滑块
+          var SCHEMA = [
+            { key: "camZ_start", label: "镜头A 摄像机 z", min: -400, max: 2000, step: 10 },
+            { key: "camZ_end", label: "镜头B 摄像机 z", min: -400, max: 2000, step: 10 },
+            { key: "camFocal", label: "焦距", min: 400, max: 3000, step: 20 },
+            { key: "panelW", label: "面板宽", min: 100, max: 900, step: 5 },
+            { key: "panelH", label: "面板高", min: 30, max: 300, step: 2 },
+            { key: "panelGapY", label: "面板间距", min: 40, max: 400, step: 5 },
+            { key: "worldX", label: "整组 x", min: -1200, max: 1200, step: 10 },
+            { key: "worldY", label: "整组 y", min: -600, max: 600, step: 10 },
+            { key: "fillA_start", label: "A 填充 起", min: 0, max: 1, step: 0.01 },
+            { key: "fillA_end", label: "A 填充 终", min: 0, max: 1, step: 0.01 },
+            { key: "shotB_at", label: "镜头B 起点(秒)", min: 0, max: 10, step: 0.1 }
+          ];
+
+          var cam = new HF.CameraRig({ focal: PARAMS.camFocal, cx: 960, cy: 540, z: PARAMS.camZ_start });
+          var panels = ["grp01-panel-a", "grp01-panel-b", "grp01-panel-c"].map(function (id) {
+            return document.getElementById(id);
+          });
+
+          // 摄像机驱动的布局：每个面板按自己的 z 投影，近的缩得快、远的缩得慢。
+          // 这是"摄像机后移"，不是 scale(0.7)。
+          function layout() {
+            cam.focal = PARAMS.camFocal;
+            panels.forEach(function (el, i) {
+              if (!el) return;
+              var p = cam.project(PARAMS.worldX, PARAMS.worldY - i * PARAMS.panelGapY, i * 260);
+              el.style.left = p.x + "px";
+              el.style.top = p.y + "px";
+              el.style.width = PARAMS.panelW * p.scale + "px";
+              el.style.height = PARAMS.panelH * p.scale + "px";
+            });
+          }
+
+          // 几何层：填充条的宽度是几何变化，不是把纹理拉伸。
+          function setFill(el, ratio) {
+            if (!el) return;
+            var fill = el.querySelector(".fill");
+            if (fill) fill.style.width = Math.max(0, Math.min(1, ratio)) * 100 + "%";
+          }
+
+          layout();
+          setFill(panels[0], PARAMS.fillA_start);
+          setFill(panels[1], 0.5);
+          setFill(panels[2], 0.28);
+
+          // ============================================================
+          // 时间轴：一条 paused 时间轴，同步注册。
+          // 镜头 A 和镜头 B 是同一条时间轴上的两段，不是两个文件。
+          // ============================================================
+          window.__timelines = window.__timelines || {};
+          var tl = gsap.timeline({ paused: true });
+
+          // —— 镜头 A：入场 ——
+          panels.forEach(function (el, i) {
+            tl.fromTo(
+              el,
+              { autoAlpha: 0, y: 26 },
+              { autoAlpha: 1, y: 0, duration: 0.7, ease: "power3.out" },
+              0.15 + i * 0.14
+            );
+          });
+          tl.fromTo(
+            "#grp01-caption",
+            { autoAlpha: 0, y: 18 },
+            { autoAlpha: 1, y: 0, duration: 0.6, ease: "power3.out" },
+            0.7
+          );
+
+          // —— 镜头 B：摄像机后移 + A 面板继续生长 ——
+          // 复用镜头 A 已经存在的元素，不重建。
+          var camState = { z: PARAMS.camZ_start };
+          tl.to(
+            camState,
+            {
+              z: PARAMS.camZ_end,
+              duration: 2.6,
+              ease: "power2.inOut",
+              onUpdate: function () {
+                cam.z = camState.z;
+                layout();
+              }
+            },
+            PARAMS.shotB_at
+          );
+
+          var fillState = { v: PARAMS.fillA_start };
+          tl.to(
+            fillState,
+            {
+              v: PARAMS.fillA_end,
+              duration: 2.2,
+              ease: "power2.inOut",
+              onUpdate: function () {
+                setFill(panels[0], fillState.v);
+              }
+            },
+            PARAMS.shotB_at + 0.2
+          );
+
+          window.__timelines["grp01-example"] = tl;
+
+          // 调参面板契约：tune.html 找到这个对象就能自动生成滑块
+          window.HF_TUNE = {
+            id: "grp01-example",
+            params: PARAMS,
+            schema: SCHEMA,
+            apply: function () {
+              cam.focal = PARAMS.camFocal;
+              layout();
+              setFill(panels[0], PARAMS.fillA_start);
+            }
+          };
+        })();
+      </script>
+    </template>
+  </body>
+</html>

@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920, height=1080">
+  <title>暗黑金融宇宙 · 全片 (The Nature of Money & Economic Consensus)</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%;
+      background: #030406;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+      user-select: none;
+    }
+    #stage {
+      position: absolute;
+      left: 50%; top: 50%;
+      width: 1920px; height: 1080px;
+      transform: translate(-50%, -50%);
+      transform-origin: center center;
+      background: #030406;
+      overflow: hidden;
+    }
+    canvas {
+      position: absolute;
+      left: 0; top: 0;
+      width: 1920px; height: 1080px;
+    }
+    #ui-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: center;
+      padding-bottom: 90px;
+    }
+    .caption-box {
+      text-align: center;
+      opacity: 0;
+      transform: translateY(16px);
+      transition: opacity 0.15s ease-out, transform 0.15s ease-out;
+    }
+    .main-title {
+      font-size: 40px;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      color: #f1f3f5;
+      text-shadow: 0 0 24px rgba(255, 255, 255, 0.4), 0 2px 8px rgba(0, 0, 0, 0.9);
+      margin-bottom: 8px;
+    }
+    .sub-en {
+      font-size: 14px;
+      font-weight: 400;
+      letter-spacing: 0.35em;
+      color: #7b8492;
+      text-transform: uppercase;
+    }
+    #controls {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(18, 22, 29, 0.85);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 40px;
+      padding: 10px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      z-index: 9999;
+      color: #e0e4ec;
+      font-size: 13px;
+      font-family: monospace;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    #controls button {
+      background: #2a313d;
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #fff;
+      border-radius: 20px;
+      padding: 6px 14px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    #controls button:hover { background: #3c4656; }
+    #timeline-slider { width: 380px; cursor: pointer; accent-color: #f2c85b; }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <canvas id="c" width="1920" height="1080"></canvas>
+    <div id="ui-layer">
+      <div id="captionBox" class="caption-box">
+        <div id="mainTitle" class="main-title">钱起源于一种共识</div>
+        <div id="subEn" class="sub-en">MONEY ORIGINATES FROM A SHARED CONSENSUS</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="controls">
+    <button id="btnPlay">PAUSE</button>
+    <input type="range" id="timeline-slider" min="0" max="43" step="0.01" value="0">
+    <span id="time-display">0.00s / 43.00s</span>
+  </div>
+
+  <script>
+    (function() {
+      const canvas = document.getElementById('c');
+      const ctx = canvas.getContext('2d');
+      const captionBox = document.getElementById('captionBox');
+      const mainTitle = document.getElementById('mainTitle');
+      const subEn = document.getElementById('subEn');
+      const DURATION = 43.0;
+
+      function clamp(v, min, max) { return Math.min(Math.max(v, min), max); }
+      function easeOutCubic(x) { return 1 - Math.pow(1 - x, 3); }
+      function easeInOutQuad(x) { return x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2; }
+      function easeInOutCubic(x) { return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; }
+
+      const FOCAL = 900;
+      const CX = 960;
+      const HORIZON_Y = 510;
+
+      function project(x, y, z, camZ = 0, camY = 0) {
+        const pz = z - camZ;
+        if (pz <= 10) return null;
+        const scale = FOCAL / pz;
+        const px = CX + x * scale;
+        const py = HORIZON_Y - (y - camY) * scale;
+        return { px, py, scale, pz };
+      }
+
+      // Pillars for Scene 1
+      const PILLARS = [];
+      for (let i = 0; i < 10; i++) {
+        const angle = (i / 10) * Math.PI * 2 + 0.32;
+        const x = Math.cos(angle) * 460 * 1.35;
+        const z = 700 + Math.sin(angle) * (460 * 0.75);
+        const height = 110 + (Math.sin(i * 1.7) * 20);
+        PILLARS.push({ x, z, height, width: 24 });
+      }
+      PILLARS.sort((a, b) => b.z - a.z);
+
+      // Wireframe City Buildings for Scene 7 & 8
+      const BUILDINGS = [];
+      const cityXList = [-360, -220, -90, 60, 200, 340, -160, 140];
+      const cityZList = [680, 750, 640, 690, 780, 720, 840, 860];
+      const cityHList = [280, 360, 420, 390, 310, 250, 460, 340];
+      const cityWList = [90, 110, 120, 100, 110, 85, 130, 95];
+      for (let i = 0; i < cityXList.length; i++) {
+        BUILDINGS.push({
+          x: cityXList[i],
+          z: cityZList[i],
+          h: cityHList[i],
+          w: cityWList[i],
+          d: cityWList[i] * 0.8
+        });
+      }
+      BUILDINGS.sort((a, b) => b.z - a.z);
+
+      // Subtitle scripts & timing schedule
+      const SCRIPT_TIMELINE = [
+        { s: 0.0, e: 4.2, zh: "钱起源于一种共识", en: "MONEY ORIGINATES FROM A SHARED CONSENSUS" },
+        { s: 4.2, e: 8.0, zh: "钱可以是贝壳", en: "IT CAN BE SEASHELLS" },
+        { s: 8.0, e: 11.6, zh: "监狱里的香烟", en: "OR CIGARETTES IN PRISON" },
+        { s: 11.6, e: 15.6, zh: "也可以是国家发行的纸币", en: "OR FIAT CURRENCY ISSUED BY NATIONS" },
+        { s: 15.6, e: 19.6, zh: "手机里的一串数字", en: "A STRING OF NUMBERS IN A PHONE" },
+        { s: 19.6, e: 23.6, zh: "或是键盘的一组代码", en: "OR A SET OF CODE ON A KEYBOARD" },
+        { s: 23.6, e: 27.6, zh: "钱是一种交易媒介", en: "MONEY IS A MEDIUM OF EXCHANGE" },
+        { s: 27.6, e: 33.0, zh: "我们需要的并不是钱本身，而是资源、产品和服务", en: "WHAT WE NEED IS NOT MONEY, BUT RESOURCES, PRODUCTS AND SERVICES" },
+        { s: 33.0, e: 37.4, zh: "同样，我们也通过自己的劳动，去参与生产", en: "LIKEWISE, WE ENGAGE IN PRODUCTION THROUGH OUR OWN LABOR" },
+        { s: 37.4, e: 43.0, zh: "我们的收入，来自其他人的消费", en: "OUR INCOME COMES FROM OTHER PEOPLE'S CONSUMPTION" }
+      ];
+
+      // Helper: Draw Consensus Luminous Orb
+      function drawOrb(cx, cy, radius, pulse = 1.0, alpha = 1.0) {
+        if (alpha <= 0) return;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        // Outer diffuse halo
+        const haloRadius = radius * 5.8 * pulse;
+        const haloGrad = ctx.createRadialGradient(cx, cy, radius * 0.4, cx, cy, haloRadius);
+        haloGrad.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
+        haloGrad.addColorStop(0.12, 'rgba(240, 245, 255, 0.6)');
+        haloGrad.addColorStop(0.35, 'rgba(180, 205, 240, 0.22)');
+        haloGrad.addColorStop(0.7, 'rgba(100, 130, 180, 0.05)');
+        haloGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = haloGrad;
+        ctx.beginPath();
+        ctx.arc(cx, cy, haloRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Inner Core Sphere
+        const coreGrad = ctx.createRadialGradient(cx - radius * 0.25, cy - radius * 0.25, radius * 0.08, cx, cy, radius);
+        coreGrad.addColorStop(0, '#ffffff');
+        coreGrad.addColorStop(0.7, '#f4f7fc');
+        coreGrad.addColorStop(0.92, '#d6e2f0');
+        coreGrad.addColorStop(1, '#92a5bd');
+        ctx.fillStyle = coreGrad;
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Hotspot
+        ctx.beginPath();
+        ctx.arc(cx - radius * 0.2, cy - radius * 0.2, radius * 0.35, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // Helper: Draw Ground Light Pool
+      function drawGroundPool(gx, gy, rx, ry, alpha = 1.0) {
+        if (alpha <= 0) return;
+        ctx.save();
+        ctx.beginPath();
+        ctx.ellipse(gx, gy, rx, ry, 0, 0, Math.PI * 2);
+        const poolGrad = ctx.createRadialGradient(gx, gy, 10, gx, gy, rx);
+        poolGrad.addColorStop(0, `rgba(255, 255, 255, ${0.42 * alpha})`);
+        poolGrad.addColorStop(0.25, `rgba(230, 240, 255, ${0.2 * alpha})`);
+        poolGrad.addColorStop(0.65, `rgba(120, 140, 180, ${0.06 * alpha})`);
+        poolGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = poolGrad;
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // Core RenderFrame(t)
+      window.renderFrame = function(t) {
+        t = clamp(t, 0, DURATION);
+
+        // Clear background
+        ctx.fillStyle = '#030508';
+        ctx.fillRect(0, 0, 1920, 1080);
+
+        // Sky & Horizon Gradient
+        const bgGrad = ctx.createLinearGradient(0, 0, 0, HORIZON_Y);
+        bgGrad.addColorStop(0, '#030406');
+        bgGrad.addColorStop(0.7, '#080b11');
+        bgGrad.addColorStop(1, '#12161f');
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(0, 0, 1920, HORIZON_Y);
+
+        // Horizon Line
+        ctx.beginPath();
+        ctx.moveTo(0, HORIZON_Y);
+        ctx.lineTo(1920, HORIZON_Y);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+
+        // Ground Plane
+        const groundGrad = ctx.createLinearGradient(0, HORIZON_Y, 0, 1080);
+        groundGrad.addColorStop(0, '#0a0d12');
+        groundGrad.addColorStop(0.35, '#05070a');
+        groundGrad.addColorStop(1, '#020304');
+        ctx.fillStyle = groundGrad;
+        ctx.fillRect(0, HORIZON_Y, 1920, 1080 - HORIZON_Y);
+
+        // Ground Perspective Grid Lines
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.02)';
+        ctx.lineWidth = 1;
+        for (let gx = -1600; gx <= 1600; gx += 320) {
+          const pStart = project(gx, 0, 500, 0, 30);
+          const pEnd = project(gx, 0, 1600, 0, 30);
+          if (pStart && pEnd) {
+            ctx.beginPath();
+            ctx.moveTo(pStart.px, pStart.py);
+            ctx.lineTo(pEnd.px, pEnd.py);
+            ctx.stroke();
+          }
+        }
+        ctx.restore();
+
+        // ==========================================
+        // SCENE 1: 共识原点 (0.0s - 4.2s)
+        // ==========================================
+        if (t >= 0.0 && t < 4.4) {
+          const sAlpha = t < 3.8 ? 1.0 : (4.4 - t) / 0.6;
+          ctx.save();
+          ctx.globalAlpha = sAlpha;
+
+          const camProgress = easeInOutQuad(t / 4.2);
+          const camZ = -60 + camProgress * 60;
+          const camY = 35 - camProgress * 10;
+
+          // Draw Pillars
+          for (const p of PILLARS) {
+            const base = project(p.x, 0, p.z, camZ, camY);
+            const top = project(p.x, p.height, p.z, camZ, camY);
+            if (!base || !top) continue;
+
+            const w = p.width * base.scale;
+            const h = base.py - top.py;
+
+            // Shadow
+            ctx.beginPath();
+            ctx.ellipse(base.px, base.py, w * 1.4, w * 0.45, 0, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+            ctx.fill();
+
+            // Body
+            const isLeft = p.x < 0;
+            const pillarGrad = ctx.createLinearGradient(base.px - w/2, 0, base.px + w/2, 0);
+            pillarGrad.addColorStop(isLeft ? 0 : 1, '#151920');
+            pillarGrad.addColorStop(0.5, '#242b36');
+            pillarGrad.addColorStop(isLeft ? 1 : 0, '#8b96a8');
+            ctx.fillStyle = pillarGrad;
+            ctx.fillRect(base.px - w/2, top.py, w, h);
+
+            // Bevel
+            ctx.beginPath();
+            ctx.ellipse(base.px, top.py, w/2, w * 0.22, 0, 0, Math.PI * 2);
+            ctx.fillStyle = '#b0bac9';
+            ctx.fill();
+          }
+
+          // Center Orb & Pool
+          const sphereFloat = Math.sin(t * 1.8) * 6;
+          const orbProj = project(0, 32 + sphereFloat, 700, camZ, camY);
+          const groundCenter = project(0, 0, 700, camZ, camY);
+          if (orbProj && groundCenter) {
+            drawGroundPool(groundCenter.px, groundCenter.py + 4, 380 * orbProj.scale, 110 * orbProj.scale, sAlpha);
+            drawOrb(orbProj.px, orbProj.py, 36 * orbProj.scale, 1.0 + Math.sin(t * 3) * 0.04, sAlpha);
+
+            // Ray Filaments (t >= 1.2s)
+            if (t >= 1.2) {
+              const rayProgress = easeOutCubic(clamp((t - 1.2) / 1.5, 0, 1));
+              for (const p of PILLARS) {
+                const pTop = project(p.x, p.height * 0.75, p.z, camZ, camY);
+                if (!pTop) continue;
+                const tx = orbProj.px + (pTop.px - orbProj.px) * rayProgress;
+                const ty = orbProj.py + (pTop.py - orbProj.py) * rayProgress;
+                ctx.beginPath();
+                ctx.moveTo(orbProj.px, orbProj.py);
+                ctx.lineTo(tx, ty);
+                ctx.strokeStyle = 'rgba(240, 245, 255, 0.25)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+              }
+            }
+          }
+          ctx.restore();
+        }
+
+        // ==========================================
+        // SCENE 2: 钱可以是贝壳 (4.2s - 8.0s)
+        // ==========================================
+        if (t >= 4.0 && t < 8.2) {
+          const st = t - 4.2;
+          const sAlpha = t < 4.6 ? (t - 4.0) / 0.6 : (t > 7.6 ? (8.2 - t) / 0.6 : 1.0);
+          ctx.save();
+          ctx.globalAlpha = sAlpha;
+
+          // Diagonal light beam guide
+          ctx.beginPath();
+          ctx.moveTo(400, 260);
+          ctx.lineTo(1520, 780);
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+
+          // 3D Wireframe / Faceted Seashell Fan
+          const shellCenterX = 1040;
+          const shellCenterY = 430;
+          const shellScale = easeOutCubic(clamp(st / 1.0, 0, 1));
+
+          // Fan segments
+          const numRibs = 11;
+          for (let i = 0; i < numRibs; i++) {
+            const angleStart = -Math.PI * 0.85 + (i / numRibs) * Math.PI * 0.75;
+            const angleEnd = -Math.PI * 0.85 + ((i + 1) / numRibs) * Math.PI * 0.75;
+            const rInner = 20 * shellScale;
+            const rOuter = 210 * shellScale;
+
+            ctx.beginPath();
+            ctx.moveTo(shellCenterX + Math.cos(angleStart) * rInner, shellCenterY + Math.sin(angleStart) * rInner);
+            ctx.lineTo(shellCenterX + Math.cos(angleStart) * rOuter, shellCenterY + Math.sin(angleStart) * rOuter);
+            ctx.lineTo(shellCenterX + Math.cos(angleEnd) * rOuter, shellCenterY + Math.sin(angleEnd) * rOuter);
+            ctx.lineTo(shellCenterX + Math.cos(angleEnd) * rInner, shellCenterY + Math.sin(angleEnd) * rInner);
+            ctx.closePath();
+
+            // Alternate facet shading
+            ctx.fillStyle = i % 2 === 0 ? 'rgba(240, 235, 225, 0.85)' : 'rgba(160, 150, 140, 0.4)';
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+          }
+
+          // Wireframe ribs behind shell
+          ctx.beginPath();
+          ctx.arc(shellCenterX, shellCenterY, 240 * shellScale, -Math.PI * 0.88, -Math.PI * 0.08);
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+          ctx.stroke();
+
+          // Glowing Consensus Orb at the bottom edge of shell
+          const orbX = shellCenterX + 160 * shellScale;
+          const orbY = shellCenterY + 170 * shellScale;
+          drawOrb(orbX, orbY, 32, 1.0 + Math.sin(st * 4) * 0.05);
+
+          ctx.restore();
+        }
+
+        // ==========================================
+        // SCENE 3: 监狱里的香烟 (8.0s - 11.6s)
+        // ==========================================
+        if (t >= 7.8 && t < 11.8) {
+          const st = t - 8.0;
+          const sAlpha = t < 8.4 ? (t - 7.8) / 0.6 : (t > 11.2 ? (11.8 - t) / 0.6 : 1.0);
+          ctx.save();
+          ctx.globalAlpha = sAlpha;
+
+          const cageX = 960;
+          const cageY = 460;
+          const rotZ = 0.08 * Math.sin(st * 1.5);
+
+          ctx.translate(cageX, cageY);
+          ctx.rotate(rotZ);
+
+          // 3D Perspective Box / Prison Cell Bars
+          const bw = 380;
+          const bh = 220;
+          const bd = 120;
+
+          // Back bars
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+          ctx.lineWidth = 1;
+          for (let bx = -bw/2; bx <= bw/2; bx += 38) {
+            ctx.beginPath();
+            ctx.moveTo(bx + bd*0.3, -bh/2 - bd*0.3);
+            ctx.lineTo(bx + bd*0.3, bh/2 - bd*0.3);
+            ctx.stroke();
+          }
+
+          // Glowing Cigarette in center
+          const cigW = 220;
+          const cigH = 22;
+          ctx.save();
+          ctx.fillStyle = '#ffffff';
+          ctx.shadowColor = '#ffffff';
+          ctx.shadowBlur = 20;
+          ctx.fillRect(-cigW/2, -cigH/2, cigW, cigH);
+
+          // Orange filter tip
+          ctx.fillStyle = '#d97d38';
+          ctx.shadowColor = '#d97d38';
+          ctx.fillRect(-cigW/2, -cigH/2, 45, cigH);
+          ctx.restore();
+
+          // Burning consensus ember/orb at tip
+          drawOrb(cigW/2, 0, 24, 1.0 + Math.sin(st * 5) * 0.06);
+
+          // Front bars
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.38)';
+          ctx.lineWidth = 1.6;
+          for (let bx = -bw/2; bx <= bw/2; bx += 38) {
+            ctx.beginPath();
+            ctx.moveTo(bx, -bh/2);
+            ctx.lineTo(bx, bh/2);
+            ctx.stroke();
+          }
+
+          // Outer wireframe bounding frame
+          ctx.strokeRect(-bw/2, -bh/2, bw, bh);
+
+          ctx.restore();
+        }
+
+        // ==========================================
+        // SCENE 4: 国家发行的纸币 (11.6s - 15.6s)
+        // ==========================================
+        if (t >= 11.4 && t < 15.8) {
+          const st = t - 11.6;
+          const sAlpha = t < 12.0 ? (t - 11.4) / 0.6 : (t > 15.2 ? (15.8 - t) / 0.6 : 1.0);
+          ctx.save();
+          ctx.globalAlpha = sAlpha;
+
+          // Connecting trajectory line
+          ctx.beginPath();
+          ctx.moveTo(380, 520);
+          ctx.lineTo(1540, 520);
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+          ctx.stroke();
+
+          // Left consensus orb
+          drawOrb(520, 520, 28);
+
+          // 3D Curved Banknote Fan Stack (Right side)
+          const stackX = 1080;
+          const stackY = 480;
+          const numBills = 4;
+
+          for (let b = 0; b < numBills; b++) {
+            const bx = stackX + (b - 1.5) * 48;
+            const by = stackY - b * 18;
+            const bw = 240;
+            const bh = 135;
+
+            ctx.save();
+            ctx.translate(bx, by);
+            // S-curve banknote profile
+            ctx.beginPath();
+            ctx.moveTo(-bw/2, -bh/2);
+            ctx.bezierCurveTo(-bw/6, -bh/2 - 20, bw/6, -bh/2 + 20, bw/2, -bh/2);
+            ctx.lineTo(bw/2, bh/2);
+            ctx.bezierCurveTo(bw/6, bh/2 + 20, -bw/6, bh/2 - 20, -bw/2, bh/2);
+            ctx.closePath();
+
+            const billGrad = ctx.createLinearGradient(-bw/2, 0, bw/2, 0);
+            if (b === numBills - 1) {
+              // Front bill: illuminated with gold / amber sheen
+              billGrad.addColorStop(0, '#c2794a');
+              billGrad.addColorStop(0.3, '#f2d096');
+              billGrad.addColorStop(0.7, '#e4b87e');
+              billGrad.addColorStop(1, '#8f5c35');
+            } else {
+              billGrad.addColorStop(0, '#353a42');
+              billGrad.addColorStop(0.5, '#7b8594');
+              billGrad.addColorStop(1, '#2c3138');
+            }
+            ctx.fillStyle = billGrad;
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            // Front Bill: ¥ CNY emblem
+            if (b === numBills - 1) {
+              ctx.fillStyle = '#ffffff';
+              ctx.font = 'bold 36px "PingFang SC", sans-serif';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText('¥', 20, -10);
+
+              ctx.font = 'bold 16px "Menlo", monospace';
+              ctx.fillText('CNY', 20, 22);
+
+              // Golden sun glow on the bill
+              const glow = ctx.createRadialGradient(-30, 0, 5, -30, 0, 80);
+              glow.addColorStop(0, 'rgba(255, 210, 100, 0.75)');
+              glow.addColorStop(1, 'rgba(255, 210, 100, 0)');
+              ctx.fillStyle = glow;
+              ctx.beginPath();
+              ctx.arc(-30, 0, 80, 0, Math.PI * 2);
+              ctx.fill();
+            }
+            ctx.restore();
+          }
+
+          ctx.restore();
+        }
+
+        // ==========================================
+        // SCENE 5: 手机里的一串数字 (15.6s - 19.6s)
+        // ==========================================
+        if (t >= 15.4 && t < 19.8) {
+          const st = t - 15.6;
+          const sAlpha = t < 16.0 ? (t - 15.4) / 0.6 : (t > 19.2 ? (19.8 - t) / 0.6 : 1.0);
+          ctx.save();
+          ctx.globalAlpha = sAlpha;
+
+          // Diagonal light beam passing through screen
+          ctx.beginPath();
+          ctx.moveTo(340, 940);
+          ctx.lineTo(1580, 280);
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+          ctx.lineWidth = 1.4;
+          ctx.stroke();
+
+          // 3D Glass Phone
+          const phoneX = 820;
+          const phoneY = 460;
+          ctx.save();
+          ctx.translate(phoneX, phoneY);
+          ctx.transform(1, -0.22, 0.12, 1, 0, 0); // 3D perspective skew
+
+          const pw = 280;
+          const ph = 520;
+
+          // Phone Body Shadow & Reflection
+          ctx.fillStyle = 'rgba(15, 18, 24, 0.92)';
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+          ctx.lineWidth = 1.8;
+          ctx.beginPath();
+          ctx.roundRect(-pw/2, -ph/2, pw, ph, 24);
+          ctx.fill();
+          ctx.stroke();
+
+          // Top Camera Pill
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+          ctx.beginPath();
+          ctx.arc(-pw/2 + 30, -ph/2 + 25, 4, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Digital Display on Screen (Amber / Orange Glowing Numbers: ¥ 11.43)
+          ctx.fillStyle = '#ff7a38';
+          ctx.shadowColor = '#ff5500';
+          ctx.shadowBlur = 18;
+          ctx.font = 'bold 34px "Menlo", monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText('¥ 11.43', 0, -10);
+
+          ctx.font = '12px "PingFang SC", sans-serif';
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+          ctx.shadowBlur = 0;
+          ctx.fillText('余额 BALANCE', 0, -45);
+          ctx.restore();
+
+          // Consensus Orb on the diagonal ray
+          drawOrb(1280, 440, 30, 1.0 + Math.sin(st * 4) * 0.05);
+
+          ctx.restore();
+        }
+
+        // ==========================================
+        // SCENE 6: 或是键盘的一组代码 (19.6s - 23.6s)
+        // ==========================================
+        if (t >= 19.4 && t < 23.8) {
+          const st = t - 19.6;
+          const sAlpha = t < 20.0 ? (t - 19.4) / 0.6 : (t > 23.2 ? (23.8 - t) / 0.6 : 1.0);
+          ctx.save();
+          ctx.globalAlpha = sAlpha;
+
+          const cx = 960;
+          const cy = 460;
+
+          // Outer Orbit Ring
+          ctx.beginPath();
+          ctx.arc(cx, cy, 260, 0, Math.PI * 2);
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+
+          // Concentric Glowing Amber Rings (Code ripples)
+          for (let r = 80; r <= 180; r += 45) {
+            ctx.beginPath();
+            ctx.arc(cx, cy, r + Math.sin(st * 3) * 6, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(230, 95, 45, ${0.45 - (r - 80) * 0.0025})`;
+            ctx.lineWidth = 2.4;
+            ctx.stroke();
+          }
+
+          // Center Optical Lens / Hemisphere
+          ctx.beginPath();
+          ctx.arc(cx, cy, 70, 0, Math.PI * 2);
+          const lensGrad = ctx.createRadialGradient(cx - 20, cy - 20, 5, cx, cy, 70);
+          lensGrad.addColorStop(0, '#f2ede3');
+          lensGrad.addColorStop(0.7, '#8892a0');
+          lensGrad.addColorStop(1, '#2c313a');
+          ctx.fillStyle = lensGrad;
+          ctx.fill();
+
+          // Inner Sensor Core
+          ctx.beginPath();
+          ctx.arc(cx, cy, 22, 0, Math.PI * 2);
+          ctx.fillStyle = '#15181e';
+          ctx.fill();
+
+          // Orbiting White Node along ring
+          const orbitAngle = st * 1.4;
+          const nodeX = cx + Math.cos(orbitAngle) * 260;
+          const nodeY = cy + Math.sin(orbitAngle) * 260;
+          drawOrb(nodeX, nodeY, 18, 1.0, 1.0);
+
+          // Floating semi-transparent code panel on the right
+          ctx.save();
+          ctx.translate(cx + 180, cy - 80);
+          ctx.rotate(-0.15);
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+          ctx.strokeRect(0, 0, 160, 120);
+          ctx.fillRect(0, 0, 160, 120);
+          // code lines
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+          for (let cl = 0; cl < 4; cl++) {
+            ctx.fillRect(16, 20 + cl * 22, 60 + cl * 20, 4);
+          }
+          ctx.restore();
+
+          ctx.restore();
+        }
+
+        // ==========================================
+        // SCENE 7: 钱是一种交易媒介 (23.6s - 27.6s)
+        // ==========================================
+        if (t >= 23.4 && t < 27.8) {
+          const st = t - 23.6;
+          const sAlpha = t < 24.0 ? (t - 23.4) / 0.6 : (t > 27.2 ? (27.8 - t) / 0.6 : 1.0);
+          ctx.save();
+          ctx.globalAlpha = sAlpha;
+
+          const camZ = -st * 40;
+          const camY = 40 + st * 25;
+
+          // Wireframe Skyscrapers City
+          const cityBuildP = easeOutCubic(clamp(st / 1.5, 0, 1));
+          for (const b of BUILDINGS) {
+            const curH = b.h * cityBuildP;
+            const bBase = project(b.x, 0, b.z, camZ, camY);
+            const bTop = project(b.x, curH, b.z, camZ, camY);
+            if (!bBase || !bTop) continue;
+
+            const bw = b.w * bBase.scale;
+            const bh = bBase.py - bTop.py;
+
+            // Wireframe vertical lines
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+            ctx.lineWidth = 1.0;
+            ctx.strokeRect(bBase.px - bw/2, bTop.py, bw, bh);
+
+            // Floor stripes
+            for (let fl = 0.2; fl < 1.0; fl += 0.2) {
+              const fy = bTop.py + bh * fl;
+              ctx.beginPath();
+              ctx.moveTo(bBase.px - bw/2, fy);
+              ctx.lineTo(bBase.px + bw/2, fy);
+              ctx.stroke();
+            }
+          }
+
+          // Ascending Consensus Orb above the city like a rising sun
+          const orbRiseY = 120 + easeOutCubic(clamp(st / 2.0, 0, 1)) * 360;
+          const orbCityProj = project(0, orbRiseY, 780, camZ, camY);
+          if (orbCityProj) {
+            drawOrb(orbCityProj.px, orbCityProj.py, 28 * orbCityProj.scale, 1.0 + Math.sin(st * 3) * 0.05);
+          }
+
+          ctx.restore();
+        }
+
+        // ==========================================
+        // SCENE 8: 资源、产品与服务 (27.6s - 33.0s)
+        // ==========================================
+        if (t >= 27.4 && t < 33.2) {
+          const st = t - 27.6;
+          const sAlpha = t < 28.0 ? (t - 27.4) / 0.6 : (t > 32.6 ? (33.2 - t) / 0.6 : 1.0);
+          ctx.save();
+          ctx.globalAlpha = sAlpha;
+
+          // Camera moves through city canyons
+          const camZ = 120 + st * 35;
+          const camY = 120 - st * 8;
+
+          for (const b of BUILDINGS) {
+            const bBase = project(b.x, 0, b.z, camZ, camY);
+            const bTop = project(b.x, b.h, b.z, camZ, camY);
+            if (!bBase || !bTop) continue;
+
+            const bw = b.w * bBase.scale;
+            const bh = bBase.py - bTop.py;
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(bBase.px - bw/2, bTop.py, bw, bh);
+          }
+
+          // 3D Floating Concept Labels
+          const labels = [
+            { x: -280, y: 340, z: 680, zh: "资源", en: "RESOURCES", tShow: 0.5 },
+            { x: 40, y: 440, z: 650, zh: "产品", en: "PRODUCTS", tShow: 1.8 },
+            { x: 380, y: 310, z: 700, zh: "服务", en: "SERVICES", tShow: 3.0 }
+          ];
+
+          for (const lb of labels) {
+            if (st >= lb.tShow) {
+              const lbAlpha = easeOutCubic(clamp((st - lb.tShow) / 0.6, 0, 1));
+              const proj = project(lb.x, lb.y, lb.z, camZ, camY);
+              if (proj) {
+                ctx.save();
+                ctx.globalAlpha = lbAlpha * sAlpha;
+                ctx.textAlign = 'center';
+                ctx.fillStyle = '#ffffff';
+                ctx.font = `bold ${Math.round(26 * proj.scale)}px "PingFang SC", sans-serif`;
+                ctx.fillText(lb.zh, proj.px, proj.py);
+
+                ctx.fillStyle = '#8c98a8';
+                ctx.font = `bold ${Math.round(11 * proj.scale)}px "Menlo", monospace`;
+                ctx.fillText(lb.en, proj.px, proj.py + 18 * proj.scale);
+                ctx.restore();
+              }
+            }
+          }
+
+          // Orb jumping from Resource -> Product -> Service
+          let orbTarget = labels[0];
+          if (st > 3.0) orbTarget = labels[2];
+          else if (st > 1.8) orbTarget = labels[1];
+
+          const orbP = project(orbTarget.x, orbTarget.y + 45, orbTarget.z, camZ, camY);
+          if (orbP) {
+            drawOrb(orbP.px, orbP.py, 22 * orbP.scale, 1.0 + Math.sin(st * 4) * 0.05);
+          }
+
+          ctx.restore();
+        }
+
+        // ==========================================
+        // SCENE 9: 劳动与生产 (33.0s - 37.4s)
+        // ==========================================
+        if (t >= 32.8 && t < 37.6) {
+          const st = t - 33.0;
+          const sAlpha = t < 33.4 ? (t - 32.8) / 0.6 : (t > 37.0 ? (37.6 - t) / 0.6 : 1.0);
+          ctx.save();
+          ctx.globalAlpha = sAlpha;
+
+          // Single Solitary Monolith Column (Labor)
+          const pBase = project(0, 0, 720, 0, 30);
+          const pTop = project(0, 220, 720, 0, 30);
+          if (pBase && pTop) {
+            const pw = 28 * pBase.scale;
+            const ph = pBase.py - pTop.py;
+
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(pBase.px - pw/2, pTop.py, pw, ph);
+
+            // Ground shadow
+            ctx.beginPath();
+            ctx.ellipse(pBase.px, pBase.py, pw * 1.5, pw * 0.5, 0, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            ctx.fill();
+          }
+
+          // Floating production cube / Wireframe 3D block
+          const cubeProg = easeOutCubic(clamp(st / 1.2, 0, 1));
+          const cubeX = 1100;
+          const cubeY = 480;
+          ctx.save();
+          ctx.translate(cubeX, cubeY);
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+          ctx.fillRect(0, 0, 26 * cubeProg, 26 * cubeProg);
+
+          // Extruded wireframe text "生产"
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.32)';
+          ctx.lineWidth = 1.4;
+          ctx.font = 'bold 72px "PingFang SC", sans-serif';
+          ctx.strokeText('生产', -180, 80);
+
+          ctx.font = 'bold 16px "Menlo", monospace';
+          ctx.fillStyle = '#8e9aa8';
+          ctx.fillText('PRODUCTION', 36, 18);
+          ctx.restore();
+
+          ctx.restore();
+        }
+
+        // ==========================================
+        // SCENE 10: 收入与消费闭环 (37.4s - 43.0s)
+        // ==========================================
+        if (t >= 37.2) {
+          const st = t - 37.4;
+          const sAlpha = t < 37.8 ? (t - 37.2) / 0.6 : 1.0;
+          ctx.save();
+          ctx.globalAlpha = sAlpha;
+
+          const camProgress = easeInOutQuad(st / 5.6);
+          const camZ = -20 - camProgress * 40;
+          const camY = 30 + camProgress * 15;
+
+          // Station 1: 收入 (INCOME) - Left Column
+          const pIncBase = project(-320, 0, 720, camZ, camY);
+          const pIncTop = project(-320, 160, 720, camZ, camY);
+          if (pIncBase && pIncTop) {
+            const w = 26 * pIncBase.scale;
+            const h = pIncBase.py - pIncTop.py;
+            ctx.fillStyle = '#1e242e';
+            ctx.fillRect(pIncBase.px - w/2, pIncTop.py, w, h);
+            // Cap
+            ctx.beginPath();
+            ctx.ellipse(pIncBase.px, pIncTop.py, w * 1.5, w * 0.6, 0, 0, Math.PI * 2);
+            ctx.fillStyle = '#f0f3f8';
+            ctx.fill();
+
+            // Label
+            ctx.fillStyle = '#ffffff';
+            ctx.font = `bold ${Math.round(28 * pIncBase.scale)}px "PingFang SC"`;
+            ctx.textAlign = 'center';
+            ctx.fillText('收入', pIncBase.px - 60, pIncTop.py - 25);
+            ctx.fillStyle = '#7a8698';
+            ctx.font = `bold ${Math.round(13 * pIncBase.scale)}px "Menlo"`;
+            ctx.fillText('INCOME', pIncBase.px - 60, pIncTop.py - 5);
+          }
+
+          // Station 2: 消费 (CONSUMPTION) - Right Platform & Runway Dashes
+          const pConBase = project(260, 0, 720, camZ, camY);
+          if (pConBase) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = `bold ${Math.round(28 * pConBase.scale)}px "PingFang SC"`;
+            ctx.textAlign = 'center';
+            ctx.fillText('消费', pConBase.px + 40, pConBase.py + 45);
+            ctx.fillStyle = '#7a8698';
+            ctx.font = `bold ${Math.round(13 * pConBase.scale)}px "Menlo"`;
+            ctx.fillText('CONSUMPTION', pConBase.px + 40, pConBase.py + 65);
+
+            // Glowing Amber Dashes on ground (Runway blocks)
+            for (let d = 0; d < 3; d++) {
+              const dx = pConBase.px - 30 + d * 60;
+              ctx.save();
+              ctx.fillStyle = '#ff6b3d';
+              ctx.shadowColor = '#ff5500';
+              ctx.shadowBlur = 16;
+              ctx.fillRect(dx, pConBase.py, 44, 12);
+              ctx.restore();
+            }
+          }
+
+          // Flowing Energy Loop between Consumption and Income
+          ctx.save();
+          const loopT = (st * 1.6) % 1.0;
+          if (pIncBase && pConBase) {
+            ctx.beginPath();
+            ctx.moveTo(pConBase.px, pConBase.py + 6);
+            ctx.quadraticCurveTo((pIncBase.px + pConBase.px) / 2, pConBase.py + 80, pIncBase.px, pIncBase.py + 6);
+            ctx.strokeStyle = 'rgba(255, 107, 61, 0.35)';
+            ctx.lineWidth = 2.0;
+            ctx.stroke();
+
+            // Energy Particle Packet moving along arc
+            const px = pConBase.px * (1 - loopT) * (1 - loopT) + ((pIncBase.px + pConBase.px) / 2) * 2 * (1 - loopT) * loopT + pIncBase.px * loopT * loopT;
+            const py = (pConBase.py + 6) * (1 - loopT) * (1 - loopT) + (pConBase.py + 80) * 2 * (1 - loopT) * loopT + (pIncBase.py + 6) * loopT * loopT;
+            drawOrb(px, py, 14, 1.0);
+          }
+          ctx.restore();
+
+          ctx.restore();
+        }
+
+        // ==========================================
+        // Subtitle Sync Engine
+        // ==========================================
+        let currentScript = null;
+        for (const item of SCRIPT_TIMELINE) {
+          if (t >= item.s && t < item.e) {
+            currentScript = item;
+            break;
+          }
+        }
+
+        if (currentScript) {
+          mainTitle.innerText = currentScript.zh;
+          subEn.innerText = currentScript.en;
+          const fadeP = easeOutCubic(clamp((t - currentScript.s) / 0.4, 0, 1));
+          captionBox.style.opacity = fadeP;
+          captionBox.style.transform = `translateY(${(1 - fadeP) * 16}px)`;
+        } else {
+          captionBox.style.opacity = 0;
+        }
+      };
+
+      // Interactive Loop
+      let isPlaying = true;
+      let startTime = performance.now();
+
+      window.stopAnimation = function() {
+        isPlaying = false;
+        if (btnPlay) btnPlay.innerText = 'PLAY';
+      };
+      window.resumeAnimation = function() {
+        isPlaying = true;
+        if (btnPlay) btnPlay.innerText = 'PAUSE';
+        startTime = performance.now() - parseFloat(slider.value) * 1000;
+      };
+
+      function loop() {
+        if (isPlaying) {
+          const now = performance.now();
+          const elapsed = ((now - startTime) / 1000) % DURATION;
+          window.renderFrame(elapsed);
+          document.getElementById('timeline-slider').value = elapsed;
+          document.getElementById('time-display').innerText = elapsed.toFixed(2) + 's / ' + DURATION.toFixed(2) + 's';
+        }
+        requestAnimationFrame(loop);
+      }
+
+      const slider = document.getElementById('timeline-slider');
+      const btnPlay = document.getElementById('btnPlay');
+      slider.addEventListener('input', (e) => {
+        isPlaying = false;
+        btnPlay.innerText = 'PLAY';
+        const val = parseFloat(e.target.value);
+        window.renderFrame(val);
+        document.getElementById('time-display').innerText = val.toFixed(2) + 's / ' + DURATION.toFixed(2) + 's';
+      });
+
+      btnPlay.addEventListener('click', () => {
+        isPlaying = !isPlaying;
+        btnPlay.innerText = isPlaying ? 'PAUSE' : 'PLAY';
+        if (isPlaying) startTime = performance.now() - parseFloat(slider.value) * 1000;
+      });
+
+      window.renderFrame(0);
+      requestAnimationFrame(loop);
+    })();
+  </script>
+</body>
+</html>

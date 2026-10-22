@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <title>调参面板</title>
+    <script src="lib/gsap.min.js"></script>
+    <script src="lib/loader.js"></script>
+    <script src="lib/camera.js"></script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #101014;
+        color: #e8e8ea;
+        font: 13px/1.5 system-ui, sans-serif;
+      }
+      #wrap {
+        display: flex;
+        height: 100vh;
+      }
+      #stageWrap {
+        flex: 1;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+      }
+      #stage {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        transform-origin: center;
+        background: #07070a;
+        flex: none;
+      }
+      #side {
+        width: 330px;
+        flex: none;
+        background: #17171c;
+        border-left: 1px solid #2a2a32;
+        display: flex;
+        flex-direction: column;
+      }
+      #side header {
+        padding: 12px 14px;
+        border-bottom: 1px solid #2a2a32;
+        font-weight: 600;
+      }
+      #ctrls {
+        flex: 1;
+        overflow-y: auto;
+        padding: 10px 14px 20px;
+      }
+      .row {
+        margin-bottom: 12px;
+      }
+      .row label {
+        display: flex;
+        justify-content: space-between;
+        opacity: 0.8;
+        margin-bottom: 3px;
+      }
+      .row label b {
+        font-weight: 600;
+        opacity: 1;
+        font-variant-numeric: tabular-nums;
+      }
+      .row input[type="range"] {
+        width: 100%;
+      }
+      #timebar {
+        padding: 10px 14px;
+        border-bottom: 1px solid #2a2a32;
+        background: #1c1c22;
+      }
+      #foot {
+        padding: 10px 14px;
+        border-top: 1px solid #2a2a32;
+      }
+      button {
+        width: 100%;
+        padding: 8px;
+        background: #3a6df0;
+        color: #fff;
+        border: 0;
+        border-radius: 5px;
+        cursor: pointer;
+        font: inherit;
+      }
+      #msg {
+        margin-top: 8px;
+        opacity: 0.65;
+        min-height: 1.4em;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="wrap">
+      <div id="stageWrap"><div id="stage"></div></div>
+      <div id="side">
+        <header>调参面板</header>
+        <div id="timebar">
+          <div class="row" style="margin: 0">
+            <label>时间 <b id="tval">0.00s</b></label>
+            <input id="time" type="range" min="0" max="10" step="0.01" value="0" />
+          </div>
+        </div>
+        <div id="ctrls"></div>
+        <div id="foot">
+          <button id="copy">复制 JSON</button>
+          <div id="msg"></div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // 用法： tune.html?scene=compositions/01-example-group.html
+      // 场景文件需要暴露 window.HF_TUNE = { id, params, schema, apply }
+      (async function () {
+        const q = new URLSearchParams(location.search);
+        const src = q.get("scene") || "compositions/01-example-group.html";
+        const stage = document.getElementById("stage");
+        const msg = document.getElementById("msg");
+
+        function fit() {
+          const w = document.getElementById("stageWrap").clientWidth;
+          const h = document.getElementById("stageWrap").clientHeight;
+          stage.style.transform = "scale(" + Math.min(w / 1920, h / 1080) * 0.96 + ")";
+        }
+        addEventListener("resize", fit);
+        fit();
+
+        // 取出场景文件的 <template> 内容，注入舞台
+        const html = await fetch(src).then((r) => r.text());
+        const doc = new DOMParser().parseFromString(html, "text/html");
+        const tpl = doc.querySelector("body > template");
+        if (!tpl) {
+          msg.textContent = "没找到 <template>：" + src;
+          return;
+        }
+        const frag = tpl.content.cloneNode(true);
+        const scripts = [];
+        frag.querySelectorAll("script").forEach((s) => {
+          scripts.push(s);
+          s.remove();
+        });
+        stage.appendChild(frag);
+        scripts.forEach((old) => {
+          const s = document.createElement("script");
+          s.textContent = old.textContent;
+          stage.appendChild(s);
+        });
+
+        const T = window.HF_TUNE;
+        if (!T) {
+          msg.textContent = "场景没有暴露 window.HF_TUNE";
+          return;
+        }
+
+        const tl = window.__timelines && window.__timelines[T.id];
+        const timeEl = document.getElementById("time");
+        const tval = document.getElementById("tval");
+        if (tl) timeEl.max = String(Math.max(1, tl.duration()));
+
+        function seek() {
+          const t = parseFloat(timeEl.value);
+          tval.textContent = t.toFixed(2) + "s";
+          if (tl) tl.seek(t);
+        }
+        timeEl.addEventListener("input", seek);
+
+        // 从 schema 自动生成滑块 —— 加参数不用改这个文件
+        const ctrls = document.getElementById("ctrls");
+        T.schema.forEach((def) => {
+          const row = document.createElement("div");
+          row.className = "row";
+          const cur = T.params[def.key];
+          row.innerHTML =
+            '<label><span>' + def.label + "</span><b>" + cur + "</b></label>" +
+            '<input type="range" min="' + def.min + '" max="' + def.max +
+            '" step="' + def.step + '" value="' + cur + '">';
+          const input = row.querySelector("input");
+          const out = row.querySelector("b");
+          input.addEventListener("input", () => {
+            const v = parseFloat(input.value);
+            T.params[def.key] = v;
+            out.textContent = v;
+            T.apply();
+            seek();
+          });
+          ctrls.appendChild(row);
+        });
+
+        document.getElementById("copy").addEventListener("click", async () => {
+          const json = JSON.stringify(T.params, null, 2);
+          try {
+            await navigator.clipboard.writeText(json);
+            msg.textContent = "已复制，粘给 AI 让它固化进源码";
+          } catch {
+            msg.textContent = json;
+          }
+        });
+
+        seek();
+      })();
+    </script>
+  </body>
+</html>

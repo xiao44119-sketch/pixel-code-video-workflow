@@ -1,0 +1,6 @@
+.thumbnails/*
+snapshots/*
+tmp/*
+!**/README.md
+!**/.gitkeep
+

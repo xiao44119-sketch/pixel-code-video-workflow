@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>骁清Finn · 古希腊神话史诗重构 · EP.01 西西弗斯</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;overflow:hidden}
+  body{display:flex;align-items:center;justify-content:center}
+  canvas{height:100vh;width:auto;max-width:100vw;aspect-ratio:9/16;display:block;background:#080a0e}
+  .preload{display:none}
+</style>
+</head>
+<body>
+<div class="preload">
+  <img id="img1" src="assets/shot1_base.jpg">
+  <img id="img2" src="assets/shot2_push.jpg">
+  <img id="img3" src="assets/shot3_summit.jpg">
+</div>
+<canvas id="c" width="1080" height="1920"></canvas>
+<script>
+(function(){
+'use strict';
+
+/* ======================================================================
+   基础常量与色彩规范
+   ====================================================================== */
+const W = 1080, H = 1920, DUR = 55.0, FPS = 30, SAFE_Y = 1536;
+const C = {
+  bg: '#080a0e',
+  gold: '#d4af37',
+  gold2: '#e5c158',
+  goldGlow: 'rgba(229,193,88,0.4)',
+  ivory: '#eef1f5',
+  red: '#ff453a',
+  cyan: '#38e6ff',
+  mute: '#8a93a1',
+  darkSlate: '#11151c'
+};
+
+const FONT = '"PingFang SC","Noto Sans SC","Source Han Sans SC","Microsoft YaHei",sans-serif';
+const NUM = '"SF Pro Display","Helvetica Neue","Inter","Segoe UI","Roboto",Arial,sans-serif';
+const MONO = 'ui-monospace,"SF Mono",Menlo,Consolas,monospace';
+const TAU = Math.PI * 2;
+
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+
+/* ======================================================================
+   数学工具函数（纯确定性）
+   ====================================================================== */
+const clamp = (x, a, b) => (x < a ? a : (x > b ? b : x));
+const lerp = (a, b, k) => a + (b - a) * k;
+const seg = (t, a, b) => clamp((t - a) / (b - a), 0, 1);
+const sstep = (a, b, x) => { const k = seg(x, a, b); return k * k * (3 - 2 * k); };
+const frac = x => x - Math.floor(x);
+const eOutC = k => 1 - Math.pow(1 - k, 3);
+const eInOutC = k => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
+const eOutExpo = k => (k >= 1 ? 1 : 1 - Math.pow(2, -10 * k));
+const eOutBack = k => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(k - 1, 3) + c1 * Math.pow(k - 1, 2); };
+
+function hash(n) {
+  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453123;
+  return x - Math.floor(x);
+}
+function noise1(x) {
+  const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f);
+  return lerp(hash(i), hash(i + 1), u);
+}
+function impulse(t, t0, d) {
+  return t < t0 ? 0 : Math.exp(-(t - t0) * d);
+}
+
+/* ======================================================================
+   卡点震动与全局透明度
+   ====================================================================== */
+const BEATS = [
+  [0.6, 0.4], [3.2, 0.6], [4.5, 0.5], [8.5, 0.6], [10.8, 0.5], [14.2, 0.7],
+  [17.2, 0.5], [21.0, 0.8], [23.2, 1.0], [27.2, 0.6], [31.5, 0.7], [32.8, 1.2],
+  [36.5, 0.6], [38.8, 1.3], [44.0, 0.7], [47.5, 1.0], [49.0, 0.5], [52.5, 0.4]
+];
+
+function cameraShake(t) {
+  let a = 0;
+  for (const b of BEATS) a += b[1] * impulse(t, b[0], 8.0);
+  return {
+    x: a * 9 * (Math.sin(t * 78.4) + 0.5 * Math.sin(t * 39.2 + 1.2)),
+    y: a * 9 * (Math.cos(t * 72.1) + 0.5 * Math.sin(t * 35.1 + 0.8)),
+    zoom: 1 + a * 0.015
+  };
+}
+
+function beatFlash(t) {
+  let f = 0;
+  for (const b of BEATS) f = Math.max(f, b[1] * impulse(t, b[0], 12.0));
+  return f;
+}
+
+/* ======================================================================
+   绘制工具基元
+   ====================================================================== */
+function dot(x, y, r, col, a) {
+  if (a <= 0.002) return;
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.fillStyle = col;
+  ctx.beginPath();
+  ctx.arc(x, y, Math.max(0.1, r), 0, TAU);
+  ctx.fill();
+  ctx.restore();
+}
+
+function glow(x, y, r, col, a) {
+  if (a <= 0.002) return;
+  ctx.save();
+  ctx.globalAlpha = a;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, col);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  ctx.restore();
+}
+
+function txt(str, x, y, o) {
+  const a = o.a === undefined ? 1 : o.a;
+  if (a <= 0.002) return;
+  const ls = o.ls || 0, align = o.align || 'center';
+  ctx.save();
+  ctx.font = (o.weight || 600) + ' ' + (o.size || 40) + 'px ' + (o.font || FONT);
+  ctx.textAlign = align;
+  ctx.textBaseline = 'middle';
+  if ('letterSpacing' in ctx) ctx.letterSpacing = ls + 'px';
+  ctx.translate(x + (align === 'center' ? ls / 2 : 0), y);
+  if (o.scale && o.scale !== 1) ctx.scale(o.scale, o.scale);
+  if (o.rot) ctx.rotate(o.rot);
+  if (o.chroma && o.chroma > 0.3) {
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = a * 0.4;
+    ctx.fillStyle = C.red;
+    ctx.fillText(str, -o.chroma, 0);
+    ctx.fillStyle = C.cyan;
+    ctx.fillText(str, o.chroma, 0);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  ctx.globalAlpha = a;
+  if (o.blur) {
+    ctx.shadowColor = o.glowCol || o.color;
+    ctx.shadowBlur = o.blur;
+  }
+  ctx.fillStyle = o.color;
+  ctx.fillText(str, 0, 0);
+  ctx.restore();
+}
+
+function keyword(str, x, y, t, t0, o) {
+  const k = seg(t, t0, t0 + 0.5);
+  if (k <= 0) return;
+  const out = o.tOut != null ? 1 - sstep(o.tOut, o.tOut + 0.35, t) : 1;
+  if (out <= 0) return;
+  const e = eOutC(k), base = o.a === undefined ? 1 : o.a;
+  txt(str, x, y + (1 - e) * 26, Object.assign({}, o, {
+    a: base * e * out,
+    scale: lerp(1.1, 1, e),
+    ls: (o.ls || 0) + (1 - e) * 24,
+    chroma: o.chroma ? (1 - e) * 12 + 4 * impulse(t, t0, 6) : 0
+  }));
+}
+
+/* ======================================================================
+   AI 电影级底模图层管理 (Hybrid Underlay)
+   ====================================================================== */
+const img1 = document.getElementById('img1');
+const img2 = document.getElementById('img2');
+const img3 = document.getElementById('img3');
+
+function drawCinematicPlate(t, sh) {
+  // 3 张母模平滑运镜与交叉溶解:
+  // Shot 1 (0.0s ~ 22.5s): 山脚远望风暴山峰 -> 镜头平滑向上推拉
+  // Shot 2 (22.5s ~ 37.5s): 贴身肉搏推石、巨石裂缝金光爆发 -> 镜头强力压迫呼吸
+  // Shot 3 (37.5s ~ 55.0s): 山巅破晓、金光万丈、傲然挺立 -> 宏大金色远景拉升
+  
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  
+  const w1 = 1 - sstep(21.8, 23.2, t);
+  const w2 = sstep(21.8, 23.2, t) * (1 - sstep(36.8, 38.2, t));
+  const w3 = sstep(36.8, 38.2, t);
+  
+  // Shot 1
+  if (w1 > 0.001) {
+    ctx.save();
+    ctx.globalAlpha = w1;
+    // 镜头缓慢向上升腾推近
+    const sc = 1.05 + 0.08 * seg(t, 0, 23) * sh.zoom;
+    const dy = -80 * seg(t, 0, 23) + sh.y;
+    const dx = sh.x;
+    ctx.translate(W / 2 + dx, H / 2 + dy);
+    ctx.scale(sc, sc);
+    ctx.drawImage(img1, -W / 2, -H / 2, W, H);
+    ctx.restore();
+  }
+  
+  // Shot 2
+  if (w2 > 0.001) {
+    ctx.save();
+    ctx.globalAlpha = w2;
+    // 镜头剧烈呼吸搏动 (推石张力)
+    const pushProg = seg(t, 22.5, 37.5);
+    const breathe = Math.sin(t * 3.5) * 8;
+    const sc = 1.08 + 0.06 * pushProg + 0.02 * Math.sin(t * 2.0);
+    const dx = -30 * pushProg + breathe + sh.x;
+    const dy = -40 * pushProg + sh.y;
+    ctx.translate(W / 2 + dx, H / 2 + dy);
+    ctx.scale(sc, sc);
+    ctx.drawImage(img2, -W / 2, -H / 2, W, H);
+    
+    // 增强巨石裂隙中的高能金光脉冲 (Code Bloom)
+    const pulse = 0.5 + 0.5 * Math.sin(t * 7.0) + 1.2 * impulse(t, 32.8, 4.0);
+    glow(W / 2 + 180, H / 2 - 120, 320 * (1 + 0.2 * pulse), 'rgba(245,190,40,0.85)', 0.45 * pulse * w2);
+    glow(W / 2 + 120, H / 2 - 180, 180, 'rgba(255,240,160,0.95)', 0.5 * pulse * w2);
+    ctx.restore();
+  }
+  
+  // Shot 3
+  if (w3 > 0.001) {
+    ctx.save();
+    ctx.globalAlpha = w3;
+    // 山巅破晓：镜头缓慢拉远，天光普照
+    const dawnProg = seg(t, 37.5, 55.0);
+    const sc = 1.15 - 0.08 * dawnProg;
+    const dy = 40 * dawnProg + sh.y;
+    const dx = sh.x;
+    ctx.translate(W / 2 + dx, H / 2 + dy);
+    ctx.scale(sc, sc);
+    ctx.drawImage(img3, -W / 2, -H / 2, W, H);
+    
+    // 太阳耀斑微光穿透 (God Rays Bloom)
+    const sunPulse = 0.6 + 0.4 * Math.sin(t * 1.5);
+    glow(W / 2 + 220, H / 2 - 280, 500, 'rgba(255,215,100,0.7)', 0.35 * sunPulse * w3);
+    glow(W / 2 + 220, H / 2 - 280, 240, 'rgba(255,255,255,0.9)', 0.4 * sunPulse * w3);
+    ctx.restore();
+  }
+  
+  ctx.restore();
+}
+
+/* ======================================================================
+   物理粒子系统：火星、石屑碎尘、金光微粒
+   ====================================================================== */
+function drawSparks(t) {
+  const count = 48;
+  for (let i = 0; i < count; i++) {
+    const sp = 45 + hash(i * 3.7 + 10) * 110;
+    const life = frac(t * 0.12 + hash(i * 5.3 + 12));
+    const x = hash(i * 2.1 + 14) * W + Math.sin(t * 1.5 + i) * 35;
+    const y = SAFE_Y - life * (SAFE_Y - 200) - hash(i * 4.9 + 16) * 100;
+    const sz = 1.2 + hash(i * 6.7 + 18) * 2.4;
+    const isGold = i % 3 === 0;
+    const alpha = Math.sin(life * Math.PI) * (isGold ? 0.85 : 0.45);
+    dot(x, y, sz, isGold ? C.gold2 : '#fff5d0', alpha);
+    if (isGold && life > 0.3 && life < 0.7) {
+      glow(x, y, sz * 8, 'rgba(229,193,88,0.6)', alpha * 0.5);
+    }
+  }
+}
+
+/* ======================================================================
+   希腊古典度量衡与现代认知力学沙盘图层
+   ====================================================================== */
+function drawMythicSandbox(t) {
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  
+  // 1. 0.5px 精细度量经纬线与十字刻度
+  ctx.strokeStyle = 'rgba(238,241,245,0.06)';
+  ctx.lineWidth = 0.5;
+  ctx.beginPath();
+  for (let x = 60; x < W; x += 120) { ctx.moveTo(x, 220); ctx.lineTo(x, SAFE_Y - 20); }
+  for (let y = 240; y < SAFE_Y; y += 120) { ctx.moveTo(60, y); ctx.lineTo(W - 60, y); }
+  ctx.stroke();
+
+  // 2. 刻度十字
+  ctx.strokeStyle = 'rgba(238,241,245,0.18)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = 180; x < W - 60; x += 360) {
+    for (let y = 360; y < SAFE_Y - 100; y += 360) {
+      ctx.moveTo(x - 8, y); ctx.lineTo(x + 8, y);
+      ctx.moveTo(x, y - 8); ctx.lineTo(x, y + 8);
+    }
+  }
+  ctx.stroke();
+
+  // 3. 欧几里得力学斜坡与势能方程 (Act 1 & 2: 势能爬升 -> 归零)
+  if (t < 23.0) {
+    const kCycle = (t % 11.0) / 11.0;
+    const hProg = sstep(0.1, 0.85, kCycle);
+    const drop = sstep(0.85, 0.98, kCycle);
+    const currH = hProg * (1 - drop);
+
+    // 斜坡导数线
+    ctx.save();
+    ctx.strokeStyle = 'rgba(212,175,55,0.35)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 8]);
+    ctx.beginPath();
+    ctx.moveTo(100, 1380);
+    ctx.lineTo(980, 520);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 巨石势能点
+    const px = lerp(100, 980, currH);
+    const py = lerp(1380, 520, currH);
+    glow(px, py, 60, 'rgba(229,193,88,0.8)', 0.6);
+    dot(px, py, 6, C.gold2, 0.95);
+
+    // 力学参数浮窗
+    txt('θ = 44.8° · 势能 Ep = mgh', px + 28, py - 32, { size: 20, font: MONO, weight: 600, color: C.ivory, a: 0.75, align: 'left' });
+    txt('STATUS: ' + (drop > 0.1 ? 'COLLAPSED (归零)' : 'ASCENDING (爬升)'), px + 28, py - 6, { size: 16, font: MONO, weight: 500, color: drop > 0.1 ? C.red : C.gold2, a: 0.85, align: 'left' });
+    ctx.restore();
+  }
+
+  // 4. Act 3: 勋章与裂隙矢量 (23.0s ~ 37.0s)
+  if (t >= 23.0 && t < 37.0) {
+    const act3Prog = seg(t, 23.0, 37.0);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(229,193,88,0.45)';
+    ctx.lineWidth = 1.2;
+    // 希腊德尔斐星盘圆环
+    const cx = W / 2 + 180, cy = H / 2 - 120;
+    const rot = t * 0.35;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 140, 0, TAU);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, 165, 0, TAU);
+    ctx.setLineDash([4, 10]);
+    ctx.lineDashOffset = -t * 15;
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    txt('FRACTURE VECTOR · 裂痕勋章', cx, cy + 190, { size: 18, font: MONO, weight: 600, color: C.gold2, a: 0.85, align: 'center', ls: 3 });
+    txt('RESISTANCE: ∞', cx, cy + 216, { size: 15, font: MONO, weight: 500, color: C.ivory, a: 0.65, align: 'center', ls: 2 });
+    ctx.restore();
+  }
+
+  // 5. Act 4: 破晓终极复仇 (37.0s ~ 55.0s)
+  if (t >= 37.0) {
+    const act4Prog = seg(t, 37.0, 52.0);
+    // 黄金突破光芒射线
+    ctx.save();
+    const cx = W / 2 + 220, cy = H / 2 - 280;
+    ctx.strokeStyle = 'rgba(229,193,88,0.3)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 12; i++) {
+      const ang = (i / 12) * TAU + t * 0.08;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(ang) * 90, cy + Math.sin(ang) * 90);
+      ctx.lineTo(cx + Math.cos(ang) * 420, cy + Math.sin(ang) * 420);
+      ctx.stroke();
+    }
+    txt('CURSE_OVERRIDDEN · 诅咒失效', 540, 420, { size: 22, font: MONO, weight: 700, color: C.gold2, a: 0.9 * eOutC(act4Prog), align: 'center', ls: 4, blur: 12 });
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
+/* ======================================================================
+   大字排版与卡点关键词 (Kinetic Headlines)
+   ====================================================================== */
+const HEADS = [
+  // [文字, 进场时间, 退场时间, 颜色, 字号, Y坐标]
+  ['又一次', 1.2, 3.8, C.red, 180, 480],
+  ['终极折磨', 6.0, 9.8, C.red, 180, 480],
+  ['归零', 12.5, 16.2, C.red, 200, 480],
+  ['无意义', 18.5, 22.0, C.red, 180, 480],
+  ['看错了', 24.2, 26.8, C.gold2, 180, 480],
+  ['不再祈求', 28.5, 32.0, C.gold2, 170, 480],
+  ['勋章', 34.0, 37.8, C.gold2, 210, 480],
+  ['向上的挣扎', 40.2, 43.6, C.gold2, 150, 480],
+  ['彻底失效', 45.2, 48.6, C.gold2, 180, 480]
+];
+
+function drawHeadlines(t) {
+  for (const h of HEADS) {
+    if (t < h[1] || t > h[2] + 0.4) continue;
+    keyword(h[0], 540, h[5], t, h[1], {
+      size: h[4],
+      weight: 800,
+      color: h[3],
+      ls: h[0].length <= 2 ? 36 : 16,
+      blur: h[3] === C.red ? 24 : 18,
+      tOut: h[2],
+      chroma: h[3] === C.red
+    });
+  }
+}
+
+/* ======================================================================
+   品牌收束名片与落款 (Outro Card: 49.0s ~ 55.0s)
+   ====================================================================== */
+function drawBrandCard(t) {
+  const k = eOutC(seg(t, 49.0, 50.2));
+  if (k <= 0) return;
+  const a = sstep(49.0, 49.4, t) * (1 - sstep(54.2, 55.0, t));
+  if (a <= 0.002) return;
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.translate(540, 980);
+  ctx.scale(lerp(0.85, 1, k), lerp(0.85, 1, k));
+
+  // 磨砂玻璃底卡
+  const w = 840, h = 420;
+  ctx.save();
+  ctx.globalAlpha = a * 0.75;
+  ctx.fillStyle = 'rgba(10,14,20,0.82)';
+  ctx.shadowColor = 'rgba(0,0,0,0.8)';
+  ctx.shadowBlur = 40;
+  ctx.beginPath();
+  ctx.roundRect(-w / 2, -h / 2, w, h, 36);
+  ctx.fill();
+  ctx.restore();
+
+  // 1px 内发光高光金边
+  ctx.save();
+  ctx.globalAlpha = a * 0.9;
+  ctx.strokeStyle = C.gold2;
+  ctx.lineWidth = 1.5;
+  ctx.shadowColor = C.gold2;
+  ctx.shadowBlur = 14;
+  ctx.beginPath();
+  ctx.roundRect(-w / 2, -h / 2, w, h, 36);
+  ctx.stroke();
+  ctx.restore();
+
+  // 名片文字
+  txt('FINN · 古希腊神话史诗重构 · EP.01', 0, -110, { size: 22, font: MONO, weight: 600, color: C.gold2, a: a, ls: 4 });
+  txt('骁清Finn', 0, -25, { size: 76, weight: 800, color: C.ivory, a: a, ls: 12, blur: 16 });
+  
+  ctx.strokeStyle = 'rgba(229,193,88,0.45)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(-260, 45); ctx.lineTo(260, 45);
+  ctx.stroke();
+
+  txt('想清楚了，评论区聊聊。', 0, 105, { size: 36, weight: 500, color: C.gold2, a: a, ls: 6, blur: 10 });
+
+  ctx.restore();
+}
+
+/* ======================================================================
+   后期质感：闪白 / 暗角 / 全屏颗粒 / 淡入淡出
+   ====================================================================== */
+function postFX(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  
+  // 卡点闪白
+  const bf = beatFlash(t);
+  if (bf > 0.02) {
+    ctx.globalAlpha = Math.min(0.12, bf * 0.08);
+    ctx.fillStyle = C.ivory;
+    ctx.fillRect(0, 0, W, SAFE_Y);
+  }
+
+  // 暗角氛围 (Vignette)
+  const v = ctx.createRadialGradient(W / 2, H / 2, 450, W / 2, H / 2, 1200);
+  v.addColorStop(0, 'rgba(0,0,0,0)');
+  v.addColorStop(1, 'rgba(4,6,10,0.65)');
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+
+  // 片头片尾淡入淡出
+  const fi = 1 - sstep(0, 0.8, t);
+  const fo = sstep(54.2, 55.0, t);
+  const fade = Math.max(fi, fo);
+  if (fade > 0.001) {
+    ctx.globalAlpha = fade;
+    ctx.fillStyle = C.bg;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
+/* ======================================================================
+   顶部 HUD
+   ====================================================================== */
+const ACTS = [
+  [0.0, 'ACT I · 荒谬循环'],
+  [11.0, 'ACT II · 现实投射'],
+  [23.0, 'ACT III · 觉醒对决'],
+  [38.0, 'ACT IV · 终极复仇']
+];
+
+function hud(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.shadowBlur = 0;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+
+  // 主理人标题
+  ctx.font = '800 30px ' + FONT;
+  ctx.fillStyle = C.gold2;
+  ctx.fillText('骁清Finn', 60, 96);
+
+  const bw = ctx.measureText('骁清Finn').width;
+  ctx.font = '400 22px ' + FONT;
+  ctx.fillStyle = 'rgba(238,241,245,0.55)';
+  ctx.fillText('｜古希腊史诗重构 · EP.01 西西弗斯', 60 + bw + 10, 97);
+
+  // 幕名
+  let act = ACTS[0][1];
+  for (const a of ACTS) if (t >= a[0]) act = a[1];
+  ctx.textAlign = 'right';
+  ctx.font = '600 22px ' + FONT;
+  ctx.fillStyle = 'rgba(238,241,245,0.85)';
+  ctx.fillText(act, 1020, 97);
+
+  // 进度条
+  ctx.fillStyle = 'rgba(238,241,245,0.08)';
+  ctx.fillRect(60, 130, 960, 2);
+  ctx.fillStyle = C.gold2;
+  ctx.fillRect(60, 130, 960 * (t / DUR), 2);
+  for (const a of ACTS) {
+    ctx.fillStyle = 'rgba(238,241,245,0.35)';
+    ctx.fillRect(60 + 960 * (a[0] / DUR) - 0.5, 125, 1, 12);
+  }
+
+  // 毫秒时间码
+  ctx.font = '500 18px ' + MONO;
+  ctx.fillStyle = 'rgba(56,230,255,0.6)';
+  ctx.fillText('T+' + t.toFixed(2) + 's  F' + String(Math.floor(t * FPS)).padStart(4, '0') + ' / ' + Math.round(DUR * FPS), 1020, 158);
+}
+
+/* ======================================================================
+   Clean Feed 铁律：画面底端 20% (Y > 1536) 保持纯净留白
+   ====================================================================== */
+function cleanFeed() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.shadowBlur = 0;
+  const top = SAFE_Y - 50;
+  const g = ctx.createLinearGradient(0, top, 0, H);
+  g.addColorStop(0, 'rgba(8,10,14,0)');
+  g.addColorStop(50 / (H - top), 'rgba(8,10,14,0.98)');
+  g.addColorStop(0.7, '#0b0d12');
+  g.addColorStop(1, '#0e1117');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, top, W, H - top);
+}
+
+/* ======================================================================
+   主渲染入口（纯确定性函数：唯一入参为 t）
+   ====================================================================== */
+function renderFrame(tIn) {
+  const t = clamp(Number(tIn) || 0, 0, DUR);
+  const sh = cameraShake(t);
+
+  // 1. 绘制 AI 电影级底模 (Shot 1 / Shot 2 / Shot 3 平滑运镜与交叉溶解)
+  drawCinematicPlate(t, sh);
+
+  // 2. 物理微粒 (火星、石屑)
+  drawSparks(t);
+
+  // 3. 欧几里得力学度量衡沙盘 (斜坡、势能函数、裂隙星盘)
+  drawMythicSandbox(t);
+
+  // 4. 动态大字卡点标题
+  drawHeadlines(t);
+
+  // 5. 品牌名片收束 (片尾)
+  drawBrandCard(t);
+
+  // 6. 顶部 HUD
+  hud(t);
+
+  // 7. 后期调色与暗角
+  postFX(t);
+
+  // 8. Clean Feed 铁律遮罩 (绝对置顶，无硬字幕)
+  cleanFeed();
+}
+
+/* ======================================================================
+   暴露渲染接口与资源预加载闭环
+   ====================================================================== */
+window.renderFrame = renderFrame;
+window.DURATION = DUR;
+window.FPS = FPS;
+
+Promise.all([
+  img1.decode ? img1.decode() : Promise.resolve(),
+  img2.decode ? img2.decode() : Promise.resolve(),
+  img3.decode ? img3.decode() : Promise.resolve()
+]).then(function() {
+  renderFrame(0);
+  window.__ready = true;
+  console.log('Hybrid Cinematic Plates Preloaded & Engine Ready!');
+}).catch(function(err) {
+  console.error('Image preload error:', err);
+  window.__ready = true;
+});
+
+const isCapture = new URLSearchParams(location.search).has('capture');
+if (!isCapture) {
+  let start = null;
+  const loop = function(now) {
+    if (start === null) start = now;
+    renderFrame(((now - start) / 1000) % DUR);
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+}
+
+})();
+</script>
+</body>
+</html>
